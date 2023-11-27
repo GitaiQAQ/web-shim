@@ -1,0 +1,26 @@
+[package]
+name = "web-shim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-std = "1.12.0"
+chromiumoxide = "0.5.6"
+chromiumoxide_cdp = "0.5.2"
+futures = "0.3.29"
+governor = "0.6.0"
+http = "1.0.0"
+lazy_static = "1.4.0"
+opendal = "0.42.0"
+serde = "1.0.193"
+serde_derive = "1.0.193"
+serde_json = "1.0.108"
+serde_qs = "0.12.0"
+sha1 = "0.10.6"
+thiserror = "1.0.50"
+thiserror-impl = "1.0.50"
+tide = "0.16.0"
+tide-tracing = "0.1.1"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+url = "2.5.0"
