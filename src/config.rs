@@ -1,4 +1,5 @@
 use lazy_static::lazy_static;
+use opendal::{Operator, Scheme};
 
 use crate::middleware::rate_limiting::RateLimitingConfig;
 
@@ -18,6 +19,16 @@ lazy_static! {
             }
             default_config
         }
+    };
+    pub static ref DAL_OP_MAP: HashMap<String, Operator> = {
+        let mut map = HashMap::new();
+        for (bucket, config) in &SERVER_CONFIG.buckets {
+            map.insert(
+                bucket.clone(),
+                Operator::via_map(Scheme::Fs, config.dal.clone()).unwrap(),
+            );
+        }
+        map
     };
 }
 
@@ -88,12 +99,16 @@ impl Default for HttpConfig {
 pub struct Bucket {
     #[serde(default = "default_buckets_rate_limiting")]
     pub rate_limiting: RateLimitingConfig,
+    #[serde(default = "default_buckets_dal")]
+    pub dal: HashMap<String, String>,
 }
 
 impl Default for Bucket {
     fn default() -> Self {
+        let dal = default_buckets_dal();
         Bucket {
             rate_limiting: default_buckets_rate_limiting(),
+            dal: dal.clone(),
         }
     }
 }
@@ -175,4 +190,10 @@ fn default_http_rate_limiting() -> RateLimitingConfig {
 
 fn default_buckets_rate_limiting() -> RateLimitingConfig {
     RateLimitingConfig::QPM(15)
+}
+
+fn default_buckets_dal() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    map.insert("root".to_string(), "./static".to_string());
+    map
 }
