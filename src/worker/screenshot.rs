@@ -3,8 +3,10 @@ use chromiumoxide::{error::CdpError, page::ScreenshotParams, Page};
 use futures::lock::Mutex;
 use lazy_static::lazy_static;
 
+use opendal::raw::{build_abs_path, build_rel_path};
 use tide::{log::error, Error, Redirect, Request, StatusCode};
 
+use std::env::current_dir;
 use std::fs::{create_dir_all, metadata};
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
@@ -54,6 +56,7 @@ impl ScreenshotWorker {
                         omit_background,
                         tx,
                         req_start,
+                        bucket,
                         filename,
                     },
                     navigate_params,
@@ -83,27 +86,42 @@ impl ScreenshotWorker {
                     }
                 } else {
                     if let Ok(img_buf) = page
-                        .save_screenshot(
-                            ScreenshotParams {
-                                cdp_params,
-                                full_page,
-                                omit_background,
-                            },
-                            &filename,
-                        )
+                        .screenshot(ScreenshotParams {
+                            cdp_params,
+                            full_page,
+                            omit_background,
+                        })
                         .await
                     {
                         let browser_dur = req_start.elapsed();
+                        let file_size = &img_buf.len();
+                        DAL_OP_MAP
+                            .get(&bucket)
+                            .unwrap()
+                            .write(&filename, img_buf)
+                            .await
+                            .unwrap();
+
+                        let writer_dur = req_start.elapsed();
                         debug!(
-                            "worker {:#} save {:#} {:#} {:#} {:#}",
+                            "worker {:#} save {:#} {:#} {:#} {:#} {:#}",
                             id,
                             &filename,
                             fetch_start.as_millis(),
                             browser_dur.as_millis(),
-                            img_buf.len()
+                            writer_dur.as_millis(),
+                            file_size,
                         );
 
-                        let _ = tx.send(Some(filename));
+                        let _ = tx.send(Some(build_rel_path(
+                            &current_dir().unwrap().to_string_lossy(),
+                            build_abs_path(
+                                format!("{:#}/", DAL_OP_MAP.get(&bucket).unwrap().info().root())
+                                    .as_str(),
+                                &filename,
+                            )
+                            .as_str(),
+                        )));
                     } else {
                         let _ = tx.send(None);
                     }
@@ -124,7 +142,7 @@ impl ScreenshotWorker {
 pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     let params: ScreenshotRequestParams = req.query().unwrap();
 
-    let filename = params.filename(bucket);
+    let filename = params.filename();
 
     let ScreenshotRequestParams {
         url,
@@ -172,6 +190,7 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
                 omit_background,
                 tx,
                 req_start: Instant::now(),
+                bucket: bucket.to_owned(),
                 filename,
             },
             1: NavigateParams {
@@ -200,7 +219,8 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     info!("send {:#}", now.elapsed().as_millis());
 
     if let Ok(Some(filename)) = rx.await {
-        return Ok(Redirect::new(format!("/{:#}", filename)).into());
+        info!("filename {:#}", filename);
+        return Ok(Redirect::new(filename).into());
     }
 
     Err(Error::from_str(StatusCode::InternalServerError, ""))
@@ -209,6 +229,7 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
 struct ScreenshotTaskInner {
     tx: OneshotSender<Option<String>>,
 
+    bucket: String,
     filename: String,
     full_page: Option<bool>,
     omit_background: Option<bool>,
@@ -220,6 +241,7 @@ struct ScreenshotTask(ScreenshotTaskInner, NavigateParams, CaptureScreenshotPara
 
 use std::hash::Hash;
 
+use crate::config::DAL_OP_MAP;
 use crate::util::hash::{calculate_hash, calculate_hash_str};
 
 #[derive(Debug, Deserialize, Hash)]
@@ -239,10 +261,9 @@ struct ScreenshotRequestParams {
 }
 
 impl ScreenshotRequestParams {
-    pub fn filename(&self, bucket: &str) -> String {
+    pub fn filename(&self) -> String {
         format!(
-            "static/{:#}/{:#}/{:x}",
-            bucket,
+            "{:#}/{:x}",
             calculate_hash_str(&self.url.origin().ascii_serialization()),
             calculate_hash(self)
         )

@@ -33,6 +33,8 @@ pub struct Claims {
 use tracing::{debug, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+use crate::config::DAL_OP_MAP;
+
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::registry()
@@ -92,6 +94,7 @@ async fn main() -> Result<(), std::io::Error> {
 
         info!("buckets {:?}", SERVER_CONFIG.buckets);
         for (bucket, config) in &SERVER_CONFIG.buckets {
+            DAL_OP_MAP.get(bucket).unwrap().create_dir("/").await?;
             let rate_limiting = NSRateLimitingMiddleware::from(&config.rate_limiting);
             app.at(format!("/screenshot/{:#}/", bucket).as_str())
                 .with(rate_limiting)
