@@ -1,0 +1,3 @@
+[submodule "chromiumoxide"]
+	path = chromiumoxide
+	url = https://github.com/GitaiQAQ/chromiumoxide.git

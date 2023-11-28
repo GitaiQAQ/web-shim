@@ -1,31 +1,35 @@
 use chromiumoxide::{error::CdpError, page::ScreenshotParams, Page};
 
+use futures::lock::Mutex;
 use lazy_static::lazy_static;
 
 use tide::{log::error, Error, Redirect, Request, StatusCode};
 
+use std::fs::{create_dir_all, metadata};
+use std::path::Path;
 use std::time::{Duration, Instant, SystemTime};
 
 use chromiumoxide_cdp::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CaptureScreenshotParams, NavigateParams, Viewport,
 };
+use futures::channel::mpsc::{unbounded, Sender, UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot::{channel as oneshot_channel, Sender as OneshotSender};
+use futures::StreamExt;
 
 use serde::{Deserialize, Serialize};
-
-use async_std::{
-    channel::{unbounded, Receiver, Sender},
-    fs::{create_dir_all, metadata},
-    path::Path,
-};
 
 use tide::log::{debug, info};
 
 use url::Url;
 
 lazy_static! {
-    static ref SCREENSHOT_TASK_CHANNEL: (Sender<ScreenshotTask>, Receiver<ScreenshotTask>) =
-        unbounded();
+    static ref SCREENSHOT_TASK_CHANNEL: (
+        UnboundedSender<ScreenshotTask>,
+        Mutex<UnboundedReceiver<ScreenshotTask>>
+    ) = {
+        let (tx, rx) = unbounded();
+        (tx, Mutex::new(rx))
+    };
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,9 +43,9 @@ pub struct Claims {
 pub struct ScreenshotWorker {}
 
 impl ScreenshotWorker {
-    pub async fn new(id: usize, page: Page, ptx: Sender<usize>) {
+    pub async fn new(id: usize, page: Page, mut ptx: Sender<usize>) {
         debug!("worker {:#} create {:?}", id, page);
-        async_std::task::spawn(async move {
+        tokio::task::spawn(async move {
             debug!("worker {:#} start", id);
             loop {
                 let ScreenshotTask(
@@ -54,7 +58,7 @@ impl ScreenshotWorker {
                     },
                     navigate_params,
                     cdp_params,
-                ) = SCREENSHOT_TASK_CHANNEL.1.recv().await.unwrap();
+                ) = SCREENSHOT_TASK_CHANNEL.1.lock().await.next().await.unwrap();
 
                 debug!("worker {:#} recv {:#} {:?}", id, filename, cdp_params);
 
@@ -73,7 +77,7 @@ impl ScreenshotWorker {
                 if let Err(cdp_error) = page.goto(navigate_params).await {
                     match cdp_error {
                         CdpError::Timeout => {
-                            let _ = ptx.send(id).await;
+                            let _ = ptx.try_send(id).unwrap();
                         }
                         err => error!("cdp error {:?}", err),
                     }
@@ -137,10 +141,10 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     for ext_name in ["png", "jpg", "webp"] {
         let file_name = format!("{:#}.{:#}", filename, ext_name);
         let file = Path::new(&file_name);
-        if file.exists().await {
+        if file.exists() {
             let _ttl = ttl.unwrap_or(60 * 5);
             if _ttl > 0 {
-                if let Ok(stat) = metadata(file).await {
+                if let Ok(stat) = metadata(file) {
                     if let Ok(time) = stat.modified() {
                         if SystemTime::now().duration_since(time).unwrap()
                             < Duration::from_secs(_ttl)
@@ -154,16 +158,15 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     }
 
     let dirpath = Path::new(&filename).parent().unwrap();
-    if !dirpath.exists().await {
-        let _ = create_dir_all(dirpath).await;
+    if !dirpath.exists() {
+        let _ = create_dir_all(dirpath);
     }
     let (tx, rx) = oneshot_channel();
 
     let now = Instant::now();
     let _ = SCREENSHOT_TASK_CHANNEL
         .0
-        .clone()
-        .send(ScreenshotTask {
+        .unbounded_send(ScreenshotTask {
             0: ScreenshotTaskInner {
                 full_page,
                 omit_background,
@@ -192,7 +195,7 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
                 capture_beyond_viewport: None,
             },
         })
-        .await;
+        .unwrap();
 
     info!("send {:#}", now.elapsed().as_millis());
 

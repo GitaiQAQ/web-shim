@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 async-std = "1.12.0"
-chromiumoxide = "0.5.6"
-chromiumoxide_cdp = "0.5.2"
+chromiumoxide = { path = "./chromiumoxide", features = [
+    "tokio-runtime",
+], default-features = false }
+chromiumoxide_cdp = { path = "./chromiumoxide/chromiumoxide_cdp" }
 futures = "0.3.29"
 governor = "0.6.0"
 http = "1.0.0"
@@ -24,3 +26,15 @@ tide-tracing = "0.1.1"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 url = "2.5.0"
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "time",
+    "fs",
+    "macros",
+    "process",
+] }
+
+[features]
+default = ["tokio-runtime"]
+tokio-runtime = []

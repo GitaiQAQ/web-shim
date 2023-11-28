@@ -1,10 +1,8 @@
 #![feature(async_closure)]
 
-use async_std::channel::bounded;
-use async_std::fs::create_dir_all;
-use async_std::path::Path;
-
-use futures::{join, StreamExt};
+use futures::{channel::mpsc::channel, join, StreamExt};
+use std::fs::create_dir_all;
+use std::path::Path;
 
 use chromiumoxide::browser::{Browser, BrowserConfig};
 
@@ -35,7 +33,7 @@ pub struct Claims {
 use tracing::{debug, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
     tracing_subscriber::registry()
         .with(fmt::layer())
@@ -58,17 +56,17 @@ async fn main() -> Result<(), std::io::Error> {
 
     debug!("launch chrome {:?}", browser);
 
-    let browser_handle = async_std::task::spawn(async move { handler.next().await.unwrap() });
+    let browser_handle = tokio::task::spawn(async move { handler.next().await.unwrap() });
 
-    async_std::task::spawn(async move {
-        let (tx, rx) = bounded(1);
+    tokio::task::spawn(async move {
+        let (tx, mut rx) = channel(1);
         for id in 0..SERVER_CONFIG.browser.pool_size.into() {
             let page = browser.new_page("about:blank").await.unwrap();
             ScreenshotWorker::new(id, page, tx.clone()).await;
         }
 
         loop {
-            let id = rx.recv().await.unwrap();
+            let id = rx.next().await.unwrap();
             let page = browser.new_page("about:blank").await.unwrap();
             ScreenshotWorker::new(id, page, tx.clone()).await;
         }
@@ -86,8 +84,8 @@ async fn main() -> Result<(), std::io::Error> {
 
         {
             let static_path = Path::new("static/");
-            if !static_path.exists().await {
-                let _ = create_dir_all(static_path).await;
+            if !static_path.exists() {
+                let _ = create_dir_all(static_path);
             }
             app.at("/static/").serve_dir("static/")?;
         }
