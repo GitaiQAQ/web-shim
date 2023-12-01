@@ -97,6 +97,8 @@ impl Default for HttpConfig {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bucket {
+    #[serde(default = "default_buckets_access_token")]
+    pub access_token: String,
     #[serde(default = "default_buckets_rate_limiting")]
     pub rate_limiting: RateLimitingConfig,
     #[serde(default = "default_buckets_dal")]
@@ -107,6 +109,7 @@ impl Default for Bucket {
     fn default() -> Self {
         let dal = default_buckets_dal();
         Bucket {
+            access_token: default_buckets_access_token(),
             rate_limiting: default_buckets_rate_limiting(),
             dal: dal.clone(),
         }
@@ -186,6 +189,10 @@ fn default_http_listen() -> String {
 
 fn default_http_rate_limiting() -> RateLimitingConfig {
     RateLimitingConfig::QPS(100)
+}
+
+fn default_buckets_access_token() -> String {
+    "".to_owned()
 }
 
 fn default_buckets_rate_limiting() -> RateLimitingConfig {

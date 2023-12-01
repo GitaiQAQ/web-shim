@@ -113,7 +113,7 @@ impl ScreenshotWorker {
                             file_size,
                         );
 
-                        let _ = tx.send(Some(build_rel_path(
+                        let file_path = build_rel_path(
                             &current_dir().unwrap().to_string_lossy(),
                             build_abs_path(
                                 format!("{:#}/", DAL_OP_MAP.get(&bucket).unwrap().info().root())
@@ -121,7 +121,15 @@ impl ScreenshotWorker {
                                 &filename,
                             )
                             .as_str(),
-                        )));
+                        );
+
+                        let _ = tx.send(Some(
+                            PresignedUrl::new(
+                                &file_path,
+                                &SERVER_CONFIG.buckets.get(&bucket).unwrap().access_token,
+                            )
+                            .to_url(),
+                        ));
                     } else {
                         let _ = tx.send(None);
                     }
@@ -167,7 +175,14 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
                         if SystemTime::now().duration_since(time).unwrap()
                             < Duration::from_secs(_ttl)
                         {
-                            return Ok(Redirect::new(format!("/{:#}", &file_name)).into());
+                            return Ok(Redirect::new(
+                                PresignedUrl::new(
+                                    &format!("/{:#}", &file_name),
+                                    &SERVER_CONFIG.buckets.get(bucket).unwrap().access_token,
+                                )
+                                .to_url(),
+                            )
+                            .into());
                         }
                     }
                 }
@@ -241,8 +256,9 @@ struct ScreenshotTask(ScreenshotTaskInner, NavigateParams, CaptureScreenshotPara
 
 use std::hash::Hash;
 
-use crate::config::DAL_OP_MAP;
+use crate::config::{DAL_OP_MAP, SERVER_CONFIG};
 use crate::util::hash::{calculate_hash, calculate_hash_str};
+use crate::util::signature_v4::PresignedUrl;
 
 #[derive(Debug, Deserialize, Hash)]
 struct ScreenshotRequestParams {

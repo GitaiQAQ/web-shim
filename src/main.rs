@@ -33,7 +33,7 @@ pub struct Claims {
 use tracing::{debug, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use crate::config::DAL_OP_MAP;
+use crate::{config::DAL_OP_MAP, middleware::access_control::LfsAccessControlMiddleware};
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
@@ -89,7 +89,6 @@ async fn main() -> Result<(), std::io::Error> {
             if !static_path.exists() {
                 let _ = create_dir_all(static_path);
             }
-            app.at("/static/").serve_dir("static/")?;
         }
 
         info!("buckets {:?}", SERVER_CONFIG.buckets);
@@ -100,6 +99,16 @@ async fn main() -> Result<(), std::io::Error> {
                 .with(rate_limiting)
                 .get(|req| screenshot(req, bucket));
         }
+
+        app.at("/static/")
+            .with(LfsAccessControlMiddleware {
+                access_tokens: SERVER_CONFIG
+                    .buckets
+                    .iter()
+                    .map(|(_k, v)| v.access_token.clone())
+                    .collect(),
+            })
+            .serve_dir("static/")?;
 
         app.listen(&SERVER_CONFIG.http.listen)
     };
