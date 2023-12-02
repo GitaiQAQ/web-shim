@@ -1,0 +1,14 @@
+# This file describes a Fastly Compute package. To learn more visit:
+# https://developer.fastly.com/reference/fastly-toml/
+
+authors = ["Gitai<i@gitai.me>"]
+cloned_from = "https://github.com/fastly/compute-starter-kit-javascript-empty"
+description = ""
+language = "javascript"
+manifest_version = 3
+name = "edge-proxy"
+service_id = "60GrUVLkHr6UadCie2IwE3"
+
+[scripts]
+build = "npm run build"
+post_init = "npm install"
