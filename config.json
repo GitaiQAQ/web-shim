@@ -51,9 +51,23 @@
   },
   "buckets": {
     "default": {
+      "access_token": "",
       "rate_limiting": {
         "type": "QPM",
         "times": 15
+      },
+      "dal": {
+        "root": "./static"
+      },
+      "screenshot_task_params": {
+        "format": "png",
+        "quality": 40,
+        "width": 1920,
+        "height": 1080,
+        "scale": 5,
+        "ttl": 60,
+        "full_page": null,
+        "omit_background": null
       }
     }
   }

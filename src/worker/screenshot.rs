@@ -148,11 +148,11 @@ impl ScreenshotWorker {
 }
 
 pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
-    let params: ScreenshotRequestParams = req.query().unwrap();
+    let params: ScreenshotRequestQSParams = req.query().unwrap();
 
     let filename = params.filename();
 
-    let ScreenshotRequestParams {
+    let ScreenshotRequestQSParams {
         url,
         format,
         quality,
@@ -197,6 +197,14 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     let (tx, rx) = oneshot_channel();
 
     let now = Instant::now();
+    let default_screenshot_task_params = &SERVER_CONFIG
+        .buckets
+        .get(bucket)
+        .unwrap()
+        .screenshot_task_params
+        .clone()
+        .unwrap();
+
     let _ = SCREENSHOT_TASK_CHANNEL
         .0
         .unbounded_send(ScreenshotTask {
@@ -216,14 +224,27 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
                 referrer_policy: None,
             },
             2: CaptureScreenshotParams {
-                format: Some(format.unwrap_or(CaptureScreenshotFormat::Jpeg)),
-                quality: Some(quality.unwrap_or(40).into()),
+                format: Some(
+                    format.unwrap_or(default_screenshot_task_params.format.clone().unwrap()),
+                ),
+                quality: Some(
+                    quality
+                        .unwrap_or(default_screenshot_task_params.quality.unwrap())
+                        .into(),
+                ),
                 clip: Some(Viewport {
                     x: 0.0,
                     y: 0.0,
-                    width: width.unwrap_or(1920).into(),
-                    height: height.unwrap_or(1080).into(),
-                    scale: Into::<f64>::into(scale.unwrap_or(5)) * 0.1 / 2.0,
+                    width: width
+                        .unwrap_or(default_screenshot_task_params.width.unwrap())
+                        .into(),
+                    height: height
+                        .unwrap_or(default_screenshot_task_params.height.unwrap())
+                        .into(),
+                    scale: Into::<f64>::into(
+                        scale.unwrap_or(default_screenshot_task_params.scale.unwrap()),
+                    ) * 0.1
+                        / 2.0,
                 }),
                 from_surface: None,
                 capture_beyond_viewport: None,
@@ -260,8 +281,8 @@ use crate::config::{DAL_OP_MAP, SERVER_CONFIG};
 use crate::util::hash::{calculate_hash, calculate_hash_str};
 use crate::util::signature_v4::PresignedUrl;
 
-#[derive(Debug, Deserialize, Hash)]
-struct ScreenshotRequestParams {
+#[derive(Debug, Serialize, Deserialize, Clone, Hash)]
+pub struct ScreenshotRequestQSParams {
     pub url: Url,
 
     pub format: Option<CaptureScreenshotFormat>,
@@ -269,14 +290,32 @@ struct ScreenshotRequestParams {
     pub width: Option<u16>,
     pub height: Option<u16>,
     pub scale: Option<u8>,
+    pub ttl: Option<u64>,
 
     pub full_page: Option<bool>,
     pub omit_background: Option<bool>,
-
-    pub ttl: Option<u64>,
 }
 
-impl ScreenshotRequestParams {
+#[derive(Debug, Serialize, Deserialize, Clone, Hash)]
+pub struct ScreenshotRequestParams {
+    #[serde(default = "default_format")]
+    pub format: Option<CaptureScreenshotFormat>,
+    #[serde(default = "default_quality")]
+    pub quality: Option<u16>,
+    #[serde(default = "default_width")]
+    pub width: Option<u16>,
+    #[serde(default = "default_height")]
+    pub height: Option<u16>,
+    #[serde(default = "default_scale")]
+    pub scale: Option<u8>,
+    #[serde(default = "default_ttl")]
+    pub ttl: Option<u64>,
+
+    pub full_page: Option<bool>,
+    pub omit_background: Option<bool>,
+}
+
+impl ScreenshotRequestQSParams {
     pub fn filename(&self) -> String {
         format!(
             "{:#}/{:x}",
@@ -284,4 +323,41 @@ impl ScreenshotRequestParams {
             calculate_hash(self)
         )
     }
+}
+
+pub fn default_buckets_screenshot_task_params() -> Option<ScreenshotRequestParams> {
+    Some(ScreenshotRequestParams {
+        format: default_format(),
+        quality: default_quality(),
+        width: default_width(),
+        height: default_height(),
+        scale: default_scale(),
+        ttl: default_ttl(),
+        full_page: None,
+        omit_background: None,
+    })
+}
+
+fn default_format() -> Option<CaptureScreenshotFormat> {
+    Some(CaptureScreenshotFormat::Jpeg)
+}
+
+fn default_quality() -> Option<u16> {
+    Some(40)
+}
+
+fn default_width() -> Option<u16> {
+    Some(1920)
+}
+
+fn default_height() -> Option<u16> {
+    Some(1080)
+}
+
+fn default_scale() -> Option<u8> {
+    Some(5)
+}
+
+fn default_ttl() -> Option<u64> {
+    Some(60)
 }

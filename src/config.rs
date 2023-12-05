@@ -1,10 +1,12 @@
 use lazy_static::lazy_static;
 use opendal::{Operator, Scheme};
 
-use crate::middleware::rate_limiting::RateLimitingConfig;
+use crate::{middleware::rate_limiting::RateLimitingConfig, util::hash::sha1_hex};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use crate::worker::screenshot;
 
 lazy_static! {
     pub static ref SERVER_CONFIG: ServerConfig = {
@@ -95,7 +97,7 @@ impl Default for HttpConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Bucket {
     #[serde(default = "default_buckets_access_token")]
     pub access_token: String,
@@ -103,6 +105,8 @@ pub struct Bucket {
     pub rate_limiting: RateLimitingConfig,
     #[serde(default = "default_buckets_dal")]
     pub dal: HashMap<String, String>,
+    #[serde(default = "screenshot::default_buckets_screenshot_task_params")]
+    pub screenshot_task_params: Option<screenshot::ScreenshotRequestParams>,
 }
 
 impl Default for Bucket {
@@ -112,6 +116,7 @@ impl Default for Bucket {
             access_token: default_buckets_access_token(),
             rate_limiting: default_buckets_rate_limiting(),
             dal: dal.clone(),
+            screenshot_task_params: screenshot::default_buckets_screenshot_task_params(),
         }
     }
 }
