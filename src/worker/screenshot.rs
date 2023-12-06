@@ -1,5 +1,6 @@
 use chromiumoxide::{error::CdpError, page::ScreenshotParams, Page};
 
+use chromiumoxide_cdp::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use futures::lock::Mutex;
 use lazy_static::lazy_static;
 
@@ -85,9 +86,26 @@ impl ScreenshotWorker {
                         err => error!("cdp error {:?}", err),
                     }
                 } else {
+                    let clip = &cdp_params.clip.unwrap();
+
+                    page.execute(SetDeviceMetricsOverrideParams::new(
+                        clip.width as i64,
+                        clip.height as i64,
+                        2.0,
+                        false,
+                    ))
+                    .await
+                    .unwrap();
+
                     if let Ok(img_buf) = page
                         .screenshot(ScreenshotParams {
-                            cdp_params,
+                            cdp_params: CaptureScreenshotParams {
+                                format: cdp_params.format,
+                                quality: cdp_params.quality,
+                                clip: Some(Viewport { ..clip.clone() }),
+                                from_surface: None,
+                                capture_beyond_viewport: None,
+                            },
                             full_page,
                             omit_background,
                         })
@@ -243,8 +261,7 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
                         .into(),
                     scale: Into::<f64>::into(
                         scale.unwrap_or(default_screenshot_task_params.scale.unwrap()),
-                    ) * 0.1
-                        / 2.0,
+                    ) / 10.0,
                 }),
                 from_surface: None,
                 capture_beyond_viewport: None,

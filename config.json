@@ -64,7 +64,7 @@
         "quality": 40,
         "width": 1920,
         "height": 1080,
-        "scale": 5,
+        "scale": 2,
         "ttl": 60,
         "full_page": null,
         "omit_background": null
