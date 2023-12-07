@@ -125,7 +125,7 @@ jobs:
       - name: Build web-shim
         timeout-minutes: 40
         # if: matrix.binary == 'web-shim'
-        run: cargo build --release
+        run: cargo build --release --target=${{ matrix.rust-target }}
 
       # Upload artifacts
       - name: Upload artifact - ${{ matrix.binary }}
