@@ -1,0 +1,155 @@
+# Build platform and run smoke test
+# Copy from fluvio
+name: CI
+
+permissions: read-all
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  merge_group:
+  pull_request:
+    branches: [master]
+    paths:
+      - "**"
+      - "!/*.md"
+      - "!/**.md"
+      - "!/rfc/**"
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: "Set --verbose to get verbose build output"
+        required: false
+        default: ""
+
+env:
+  CARGO_TERM_COLOR: always
+  VERBOSE: ${{ github.events.input.verbose }}
+  K3D_VERSION: v5.4.9
+  BATS_VERSION: 1.9.0
+  MINIKUBE_VERSION: v1.30.1
+  LLVM_VERSION: 14.0.0    # stick with 14 for now since Github action is default to clang-14
+  K8_VERSION: v1.26.3
+  TLS_ARGS: --tls --domain fluvio.local --server-key ./tls/certs/server.key --server-cert ./tls/certs/server.crt --ca-cert ./tls/certs/ca.crt --client-cert ./tls/certs/client-root.crt --client-key ./tls/certs/client-root.key
+  AUTH_FILE: crates/fluvio-sc/test-data/auth_config/policy.json
+  X509_SCOPE_FILE: crates/fluvio-sc/test-data/auth_config/scopes.json
+  FLV_CLUSTER_PROVISION_TIMEOUT: 600
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  # this job set up dynamic configuration shared among jobs
+  config:
+    name: Set up Config
+    runs-on: ubuntu-latest
+    env:
+      ENABLE_CHECK: true
+      TEST_RUNS: "[r1]" # default runs
+    outputs:
+      check: ${{ steps.check.outputs.check }}
+      runs: ${{ steps.runs.outputs.runs }}
+    steps:
+      - id: check
+        run: echo "::set-output name=check::${{ env.ENABLE_CHECK }}"
+      #- name: Set Staging runs
+      ##  if: github.event_name == 'merge_group'
+      #  run: echo "TEST_RUNS='[r1,r2,r3,r4,r5]'" | tee -a $GITHUB_ENV
+
+  # build other binaries which doesn't need test
+  build_binaries:
+    name: Build ${{ matrix.binary }} for ${{ matrix.rust-target }} on (${{ matrix.os }})
+    # if: github.event_name == 'merge_group'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      #    fail-fast: false
+      matrix:
+        include:
+          # web-shim
+          - os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+            binary: web-shim
+          - os: ubuntu-latest
+            rust-target: x86_64-unknown-linux-musl
+            binary: web-shim
+          - os: ubuntu-latest
+            rust-target: aarch64-unknown-linux-musl
+            binary: web-shim
+          - os: ubuntu-latest
+            rust-target: arm-unknown-linux-gnueabihf
+            binary: web-shim
+          - os: ubuntu-latest
+            rust-target: armv7-unknown-linux-gnueabihf
+            binary: web-shim
+          - os: ubuntu-latest
+            rust-target: x86_64-pc-windows-gnu
+            binary: web-shim.exe
+          - os: macos-12
+            rust-target: x86_64-apple-darwin
+            binary: web-shim
+          - os: macos-12
+            rust-target: aarch64-apple-darwin
+            binary: web-shim
+
+    env:
+      RUST_BACKTRACE: full
+      RELEASE_NAME: debug
+      RUST_BIN_DIR: target/debug
+    steps:
+      - uses: actions/checkout@v4
+        with: 
+          submodules: recursive
+
+      # If this job is being run by merge_group,
+      # then build and run in release mode
+      - name: Set RELEASE mode
+        # if: github.event_name == 'merge_group'
+        shell: bash
+        run: |
+          echo "RELEASE=true" | tee -a $GITHUB_ENV
+          echo "RELEASE_NAME=release" | tee -a $GITHUB_ENV
+          echo "RUST_BIN_DIR=target/release" | tee -a $GITHUB_ENV
+
+      - name: Print env
+        run: |
+          echo "RUST_BIN_DIR = ${{ env.RUST_BIN_DIR }} "
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
+      - name: install Rust target
+        run: rustup target add ${{ matrix.rust-target }}
+      - uses: Swatinem/rust-cache@v2
+        timeout-minutes: 10
+        with:
+          key: ${{ matrix.os }}-${{ matrix.rust-target }}-${{ matrix.binary }}
+
+      - name: Build web-shim
+        timeout-minutes: 40
+        # if: matrix.binary == 'web-shim'
+        run: cargo build --release
+
+      # Upload artifacts
+      - name: Upload artifact - ${{ matrix.binary }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.binary }}-${{ matrix.rust-target }}
+          path: ${{ env.RUST_BIN_DIR }}/${{ matrix.binary }}
+          retention-days: 1
+
+  # Job that follows the success of all required jobs in this workflow.
+  # Used by Bors to detect that all required jobs have completed successfully
+  done:
+    name: Done
+    permissions:
+      contents: write
+    # if: github.event_name == 'merge_group'
+    needs:
+      - build_binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Done
+        run: echo "Done!"
+      - name: Repo dispatch ci-success
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          event-type: ci-success
+          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
