@@ -110,9 +110,6 @@ jobs:
           echo "RELEASE_NAME=release" | tee -a $GITHUB_ENV
           echo "RUST_BIN_DIR=target/release" | tee -a $GITHUB_ENV
 
-      - name: Print env
-        run: |
-          echo "RUST_BIN_DIR = ${{ env.RUST_BIN_DIR }} "
       - name: Install Rust Nightly
         uses: dtolnay/rust-toolchain@nightly
       - name: install Rust target
@@ -133,14 +130,14 @@ jobs:
         # if: matrix.binary == 'web-shim'
         run: |
           cargo build --release --target ${{ matrix.rust-target }}
-          ls target/**
+          ls target/**/**
 
       # Upload artifacts
       - name: Upload artifact - ${{ matrix.binary }}
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.binary }}-${{ matrix.rust-target }}
-          path: ${{ env.RUST_BIN_DIR }}/${{ matrix.binary }}
+          path: target/${{ matrix.rust-target }}/release/${{ matrix.binary }}
           retention-days: 1
 
   # Job that follows the success of all required jobs in this workflow.
