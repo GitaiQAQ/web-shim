@@ -62,7 +62,7 @@ jobs:
     # if: github.event_name == 'merge_group'
     runs-on: ${{ matrix.os }}
     strategy:
-      #    fail-fast: false
+      fail-fast: false
       matrix:
         include:
           # web-shim
@@ -81,9 +81,9 @@ jobs:
           # - os: ubuntu-latest
           #   rust-target: armv7-unknown-linux-gnueabihf
           #   binary: web-shim
-          - os: ubuntu-latest
-            rust-target: x86_64-pc-windows-gnu
-            binary: web-shim.exe
+          # - os: ubuntu-latest
+          #   rust-target: x86_64-pc-windows-gnu
+          #   binary: web-shim.exe
           - os: macos-12
             rust-target: x86_64-apple-darwin
             binary: web-shim
