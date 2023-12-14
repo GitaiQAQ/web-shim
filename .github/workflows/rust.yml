@@ -72,15 +72,15 @@ jobs:
           - os: ubuntu-latest
             rust-target: x86_64-unknown-linux-musl
             binary: web-shim
-          - os: ubuntu-latest
-            rust-target: aarch64-unknown-linux-musl
-            binary: web-shim
-          - os: ubuntu-latest
-            rust-target: arm-unknown-linux-gnueabihf
-            binary: web-shim
-          - os: ubuntu-latest
-            rust-target: armv7-unknown-linux-gnueabihf
-            binary: web-shim
+          # - os: ubuntu-latest
+          #   rust-target: aarch64-unknown-linux-musl
+          #   binary: web-shim
+          # - os: ubuntu-latest
+          #   rust-target: arm-unknown-linux-gnueabihf
+          #   binary: web-shim
+          # - os: ubuntu-latest
+          #   rust-target: armv7-unknown-linux-gnueabihf
+          #   binary: web-shim
           - os: ubuntu-latest
             rust-target: x86_64-pc-windows-gnu
             binary: web-shim.exe
@@ -122,10 +122,17 @@ jobs:
         with:
           key: ${{ matrix.os }}-${{ matrix.rust-target }}-${{ matrix.binary }}
 
+      - name: Prepare
+        timeout-minutes: 40
+        if: matrix.rust-target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt install -y musl-tools
+
       - name: Build web-shim
         timeout-minutes: 40
         # if: matrix.binary == 'web-shim'
-        run: cargo build --release --target=${{ matrix.rust-target }}
+        run: |
+          cargo build --release --target ${{ matrix.rust-target }}
 
       # Upload artifacts
       - name: Upload artifact - ${{ matrix.binary }}
