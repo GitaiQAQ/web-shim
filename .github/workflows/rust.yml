@@ -133,6 +133,7 @@ jobs:
         # if: matrix.binary == 'web-shim'
         run: |
           cargo build --release --target ${{ matrix.rust-target }}
+          ls target/**
 
       # Upload artifacts
       - name: Upload artifact - ${{ matrix.binary }}
