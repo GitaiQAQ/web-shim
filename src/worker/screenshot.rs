@@ -208,10 +208,6 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
         }
     }
 
-    let dirpath = Path::new(&filename).parent().unwrap();
-    if !dirpath.exists() {
-        let _ = create_dir_all(dirpath);
-    }
     let (tx, rx) = oneshot_channel();
 
     let now = Instant::now();
