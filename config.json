@@ -34,8 +34,7 @@
       "--disable-setuid-sandbox",
       "--block-new-web-contents",
       "--force-device-scale-factor=2",
-      "--headless",
-      "--single-process"
+      "--headless"
     ],
     "width": 1920,
     "height": 1080,

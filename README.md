@@ -8,7 +8,7 @@ Follow the steps below to install the service:
 
 1. Download and Extract the Chrome files:
 ```shell
-$ wget https://registry.npmmirror.com/-/binary/chromium-browser-snapshots/Linux_x64/1065418/chrome-linux.zip && unzip chrome-linux.zip
+$ wget https://registry.npmmirror.com/-/binary/chromium-browser-snapshots/Linux_x64/1045489/chrome-linux.zip && unzip chrome-linux.zip
 ```
 
 2. Make sure Chrome installation is successful:
