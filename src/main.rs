@@ -1,8 +1,8 @@
 #![feature(async_closure)]
 
 use futures::{channel::mpsc::channel, join, StreamExt};
-use std::fs::create_dir_all;
 use std::path::Path;
+use std::{fs::create_dir_all, process};
 
 use chromiumoxide::browser::{Browser, BrowserConfig};
 
@@ -109,6 +109,14 @@ async fn main() -> Result<(), std::io::Error> {
                     .collect(),
             })
             .serve_dir("static/")?;
+
+        app.at("/stats").get(|_| async {
+            let pid_map = util::pstree::build_process_tree();
+            Ok(format!(
+                "## pstree\n {}",
+                util::pstree::format_node(&(pid_map.get(&process::id()).unwrap()), 0, &pid_map)
+            ))
+        });
 
         app.listen(&SERVER_CONFIG.http.listen)
     };
