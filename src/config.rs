@@ -1,10 +1,10 @@
 use lazy_static::lazy_static;
 use opendal::{Operator, Scheme};
 
-use crate::{middleware::rate_limiting::RateLimitingConfig, util::hash::sha1_hex};
+use crate::middleware::rate_limiting::RateLimitingConfig;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::worker::screenshot;
 
@@ -27,7 +27,7 @@ lazy_static! {
         for (bucket, config) in &SERVER_CONFIG.buckets {
             map.insert(
                 bucket.clone(),
-                Operator::via_map(Scheme::Fs, config.dal.clone()).unwrap(),
+                Operator::via_map(Scheme::from_str(config.dal.get("schema").unwrap_or(&String::from("fs"))).unwrap_or(Scheme::Fs), config.dal.clone()).unwrap(),
             );
         }
         map
@@ -155,7 +155,7 @@ static DEFAULT_PUPPETEER_ARGS: [&str; 25] = [
     "--lang=en_US",
 ];
 
-static DEFAULT_ARGS: [&str; 10] = [
+static DEFAULT_ARGS: [&str; 9] = [
     "--disable-gpu",
     "--no-default-browser-check",
     "--hide-scrollbars",
@@ -165,7 +165,6 @@ static DEFAULT_ARGS: [&str; 10] = [
     "--block-new-web-contents",
     "--force-device-scale-factor=2",
     "--headless",
-    "--single-process",
 ];
 
 fn default_browser_args() -> Vec<String> {
@@ -206,6 +205,6 @@ fn default_buckets_rate_limiting() -> RateLimitingConfig {
 
 fn default_buckets_dal() -> HashMap<String, String> {
     let mut map = HashMap::new();
-    map.insert("root".to_string(), "./static".to_string());
+    map.insert("root".to_string(), "./static/shared".to_string());
     map
 }
