@@ -1,16 +1,15 @@
-use chromiumoxide::{error::CdpError, page::ScreenshotParams, Page};
+use chromiumoxide::{page::ScreenshotParams, Page};
 
 use chromiumoxide_cdp::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use futures::lock::Mutex;
 use lazy_static::lazy_static;
 
 use opendal::raw::{build_abs_path, build_rel_path};
-use tide::{log::error, Error, Redirect, Request, StatusCode};
+use opendal::Scheme;
+use tide::{Error, Redirect, Request, StatusCode};
 
 use std::env::current_dir;
-use std::fs::{create_dir_all, metadata};
-use std::path::Path;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use chromiumoxide_cdp::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CaptureScreenshotParams, NavigateParams, Viewport,
@@ -46,118 +45,25 @@ pub struct Claims {
 pub struct ScreenshotWorker {}
 
 impl ScreenshotWorker {
-    pub async fn new(id: usize, page: Page, mut ptx: Sender<usize>) {
+    pub async fn new(id: usize, page: Page, ptx: Sender<usize>) {
         debug!("worker {:#} create {:?}", id, page);
         tokio::task::spawn(async move {
             debug!("worker {:#} start", id);
             loop {
-                let ScreenshotTask(
-                    ScreenshotTaskInner {
-                        full_page,
-                        omit_background,
-                        tx,
-                        req_start,
-                        bucket,
-                        filename,
-                    },
-                    navigate_params,
-                    cdp_params,
-                ) = SCREENSHOT_TASK_CHANNEL.1.lock().await.next().await.unwrap();
-
-                debug!("worker {:#} recv {:#} {:?}", id, filename, cdp_params);
-
-                let fetch_start = req_start.elapsed();
-                let filename = format!(
-                    "{:#}.{:#}",
-                    filename,
-                    match cdp_params.format.clone() {
-                        Some(CaptureScreenshotFormat::Jpeg) => "jpg",
-                        Some(CaptureScreenshotFormat::Webp) => "webp",
-                        _ => "png",
-                    }
-                )
-                .to_owned();
-
-                if let Err(cdp_error) = page.goto(navigate_params).await {
-                    match cdp_error {
-                        CdpError::Timeout => {
-                            let _ = ptx.try_send(id).unwrap();
+                if let Some(ScreenshotTask(tx, inner, navigate_params, cdp_params)) =
+                    SCREENSHOT_TASK_CHANNEL.1.lock().await.next().await
+                {
+                    match worker(id, &page, inner, navigate_params, cdp_params).await {
+                        Ok(uri) => {
+                            tx.send(Some(uri));
                         }
-                        err => error!("cdp error {:?}", err),
+                        Err(_) => {
+                            tx.send(None);
+                        }
                     }
-                } else {
-                    let clip = &cdp_params.clip.unwrap();
-
-                    page.execute(SetDeviceMetricsOverrideParams::new(
-                        clip.width as i64,
-                        clip.height as i64,
-                        2.0,
-                        false,
-                    ))
-                    .await
-                    .unwrap();
-
-                    if let Ok(img_buf) = page
-                        .screenshot(ScreenshotParams {
-                            cdp_params: CaptureScreenshotParams {
-                                format: cdp_params.format,
-                                quality: cdp_params.quality,
-                                clip: Some(Viewport { ..clip.clone() }),
-                                from_surface: None,
-                                capture_beyond_viewport: None,
-                            },
-                            full_page,
-                            omit_background,
-                        })
-                        .await
-                    {
-                        let browser_dur = req_start.elapsed();
-                        let file_size = &img_buf.len();
-                        DAL_OP_MAP
-                            .get(&bucket)
-                            .unwrap()
-                            .write(&filename, img_buf)
-                            .await
-                            .unwrap();
-
-                        let writer_dur = req_start.elapsed();
-                        debug!(
-                            "worker {:#} save {:#} {:#} {:#} {:#} {:#}",
-                            id,
-                            &filename,
-                            fetch_start.as_millis(),
-                            browser_dur.as_millis(),
-                            writer_dur.as_millis(),
-                            file_size,
-                        );
-
-                        let file_path = build_rel_path(
-                            &current_dir().unwrap().to_string_lossy(),
-                            build_abs_path(
-                                format!("{:#}/", DAL_OP_MAP.get(&bucket).unwrap().info().root())
-                                    .as_str(),
-                                &filename,
-                            )
-                            .as_str(),
-                        );
-
-                        let _ = tx.send(Some(
-                            PresignedUrl::new(
-                                &file_path,
-                                &SERVER_CONFIG.buckets.get(&bucket).unwrap().access_token,
-                            )
-                            .to_url(),
-                        ));
-                    } else {
-                        let _ = tx.send(None);
-                    }
-
-                    let _ = page.goto("about:blank").await;
-
-                    continue;
                 }
-                break;
             }
+            let _ = ptx.try_send(id).unwrap();
             let _ = page.close().await;
             debug!("worker {:#} end", id);
         });
@@ -165,10 +71,114 @@ impl ScreenshotWorker {
     }
 }
 
+pub async fn worker(
+    id: usize,
+    page: &Page,
+    inner: ScreenshotTaskInner,
+    navigate_params: NavigateParams,
+    cdp_params: CaptureScreenshotParams,
+) -> Result<String, ()> {
+    debug!("worker {:#} recv {:#} {:?}", id, inner.filename, cdp_params);
+    let op = DAL_OP_MAP.get(&inner.bucket).unwrap();
+    let fetch_start = inner.req_start.elapsed();
+    let filename = format!(
+        "{:#}.{:#}",
+        inner.filename,
+        match cdp_params.format.clone() {
+            Some(CaptureScreenshotFormat::Jpeg) => "jpg",
+            Some(CaptureScreenshotFormat::Webp) => "webp",
+            _ => "png",
+        }
+    )
+    .to_owned();
+
+    let _ = page.goto(navigate_params).await.unwrap();
+
+    let clip = &cdp_params.clip.unwrap();
+
+    page.execute(SetDeviceMetricsOverrideParams::new(
+        clip.width as i64,
+        clip.height as i64,
+        2.0,
+        false,
+    ))
+    .await
+    .unwrap();
+
+    let img_buf = page
+        .screenshot(ScreenshotParams {
+            cdp_params: CaptureScreenshotParams {
+                format: cdp_params.format,
+                quality: cdp_params.quality,
+                clip: Some(Viewport { ..clip.clone() }),
+                from_surface: None,
+                capture_beyond_viewport: None,
+            },
+            full_page: inner.full_page,
+            omit_background: inner.omit_background,
+        })
+        .await
+        .unwrap();
+
+    let browser_dur = inner.req_start.elapsed();
+    let file_size = &img_buf.len();
+
+    op.write(&filename, img_buf).await;
+
+    let writer_dur = inner.req_start.elapsed();
+
+    
+    let signed_url = match op.info().scheme() {
+        Scheme::Fs => {
+            let file_path = build_rel_path(
+                &current_dir().unwrap().to_string_lossy(),
+                build_abs_path(
+                    format!("{:#}/", op.info().root()).as_str(),
+                    &filename,
+                )
+                .as_str()
+            );
+            return Ok(PresignedUrl::new(
+                    &file_path,
+                    &SERVER_CONFIG.buckets.get(&inner.bucket).unwrap().access_token,
+                )
+                .to_url());
+            
+        },
+        _ => {
+            op
+            .presign_read(&filename, Duration::from_secs(3600))
+            .await
+            .unwrap()
+            .uri()
+            .to_string()
+        }
+    };
+    
+    let presign_dur = inner.req_start.elapsed();
+
+    debug!(
+        "worker {:#} save {:#} {:#} {:#} {:#} {:#} {:#}",
+        id,
+        &filename,
+        fetch_start.as_millis(),
+        browser_dur.as_millis(),
+        writer_dur.as_millis(),
+        presign_dur.as_millis(),
+        file_size,
+    );
+
+    page.goto("about:blank").await.unwrap();
+
+    return Ok(signed_url);
+}
+
 pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     let params: ScreenshotRequestQSParams = req.query().unwrap();
 
     let filename = params.filename();
+    let path = params.path();
+    let op = DAL_OP_MAP.get(bucket).unwrap();
 
     let ScreenshotRequestQSParams {
         url,
@@ -182,30 +192,14 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
         ttl,
     } = params;
 
-    for ext_name in ["png", "jpg", "webp"] {
-        let file_name = format!("{:#}.{:#}", filename, ext_name);
-        let file = Path::new(&file_name);
-        if file.exists() {
-            let _ttl = ttl.unwrap_or(60 * 5);
-            if _ttl > 0 {
-                if let Ok(stat) = metadata(file) {
-                    if let Ok(time) = stat.modified() {
-                        if SystemTime::now().duration_since(time).unwrap()
-                            < Duration::from_secs(_ttl)
-                        {
-                            return Ok(Redirect::new(
-                                PresignedUrl::new(
-                                    &format!("/{:#}", &file_name),
-                                    &SERVER_CONFIG.buckets.get(bucket).unwrap().access_token,
-                                )
-                                .to_url(),
-                            )
-                            .into());
-                        }
-                    }
-                }
-            }
-        }
+    if op.is_exist(&path).await.unwrap() {
+        let uri = op
+            .presign_read(&path, Duration::from_secs(3600))
+            .await
+            .unwrap()
+            .uri()
+            .to_string();
+        return Ok(Redirect::new(uri).into());
     }
 
     let (tx, rx) = oneshot_channel();
@@ -222,22 +216,22 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     let _ = SCREENSHOT_TASK_CHANNEL
         .0
         .unbounded_send(ScreenshotTask {
-            0: ScreenshotTaskInner {
+            0: tx,
+            1: ScreenshotTaskInner {
                 full_page,
                 omit_background,
-                tx,
                 req_start: Instant::now(),
                 bucket: bucket.to_owned(),
                 filename,
             },
-            1: NavigateParams {
+            2: NavigateParams {
                 url: url.to_string(),
                 referrer: None,
                 transition_type: None,
                 frame_id: None,
                 referrer_policy: None,
             },
-            2: CaptureScreenshotParams {
+            3: CaptureScreenshotParams {
                 format: Some(
                     format.unwrap_or(default_screenshot_task_params.format.clone().unwrap()),
                 ),
@@ -268,7 +262,7 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     info!("send {:#}", now.elapsed().as_millis());
 
     if let Ok(Some(filename)) = rx.await {
-        info!("filename {:#}", filename);
+        info!("redirect to {:#}", filename);
         return Ok(Redirect::new(filename).into());
     }
 
@@ -276,8 +270,6 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
 }
 
 struct ScreenshotTaskInner {
-    tx: OneshotSender<Option<String>>,
-
     bucket: String,
     filename: String,
     full_page: Option<bool>,
@@ -286,7 +278,12 @@ struct ScreenshotTaskInner {
     req_start: Instant,
 }
 
-struct ScreenshotTask(ScreenshotTaskInner, NavigateParams, CaptureScreenshotParams);
+struct ScreenshotTask(
+    OneshotSender<Option<String>>,
+    ScreenshotTaskInner,
+    NavigateParams,
+    CaptureScreenshotParams,
+);
 
 use std::hash::Hash;
 
@@ -334,6 +331,16 @@ impl ScreenshotRequestQSParams {
             "{:#}/{:x}",
             calculate_hash_str(&self.url.origin().ascii_serialization()),
             calculate_hash(self)
+        )
+    }
+
+    pub fn path(&self) -> String {
+        format!(
+            "{:#}.{:#}",
+            self.filename(),
+            self.format.clone()
+                .unwrap_or(CaptureScreenshotFormat::Jpeg)
+                .as_ref()
         )
     }
 }
