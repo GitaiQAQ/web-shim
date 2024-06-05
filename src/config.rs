@@ -6,7 +6,7 @@ use crate::middleware::rate_limiting::RateLimitingConfig;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
 
-use crate::worker::screenshot;
+use crate::worker::{screenshot, pdf};
 
 lazy_static! {
     pub static ref SERVER_CONFIG: ServerConfig = {
@@ -107,6 +107,8 @@ pub struct Bucket {
     pub dal: HashMap<String, String>,
     #[serde(default = "screenshot::default_buckets_screenshot_task_params")]
     pub screenshot_task_params: Option<screenshot::ScreenshotRequestParams>,
+    #[serde(default = "pdf::default_buckets_pdf_task_params")]
+    pub pdf_task_params: Option<pdf::PDFRequestParams>,
 }
 
 impl Default for Bucket {
@@ -117,6 +119,7 @@ impl Default for Bucket {
             rate_limiting: default_buckets_rate_limiting(),
             dal: dal.clone(),
             screenshot_task_params: screenshot::default_buckets_screenshot_task_params(),
+            pdf_task_params: pdf::default_buckets_pdf_task_params(),
         }
     }
 }

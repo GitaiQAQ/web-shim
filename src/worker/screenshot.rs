@@ -128,32 +128,7 @@ pub async fn worker(
     let writer_dur = inner.req_start.elapsed();
 
     
-    let signed_url = match op.info().scheme() {
-        Scheme::Fs => {
-            let file_path = build_rel_path(
-                &current_dir().unwrap().to_string_lossy(),
-                build_abs_path(
-                    format!("{:#}/", op.info().root()).as_str(),
-                    &filename,
-                )
-                .as_str()
-            );
-            return Ok(PresignedUrl::new(
-                    &file_path,
-                    &SERVER_CONFIG.buckets.get(&inner.bucket).unwrap().access_token,
-                )
-                .to_url());
-            
-        },
-        _ => {
-            op
-            .presign_read(&filename, Duration::from_secs(3600))
-            .await
-            .unwrap()
-            .uri()
-            .to_string()
-        }
-    };
+    let signed_url = signed_url(op, &filename, &inner.bucket).await.unwrap();
     
     let presign_dur = inner.req_start.elapsed();
 
@@ -172,6 +147,7 @@ pub async fn worker(
 
     return Ok(signed_url);
 }
+
 
 pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
     let params: ScreenshotRequestQSParams = req.query().unwrap();
@@ -192,14 +168,11 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
         ttl,
     } = params;
 
-    if op.is_exist(&path).await.unwrap() {
-        let uri = op
-            .presign_read(&path, Duration::from_secs(3600))
-            .await
-            .unwrap()
-            .uri()
-            .to_string();
-        return Ok(Redirect::new(uri).into());
+    if op.is_exist(&path).await.unwrap() && ttl.is_some() {
+        if op.stat(&path).await.unwrap().last_modified().unwrap().checked_add_signed(chrono::TimeDelta::new(ttl.unwrap().try_into().unwrap(), 0).unwrap()).unwrap() >= chrono::Local::now() {
+        let signed_url = signed_url(op, &path, bucket).await.unwrap();
+        return Ok(Redirect::new(signed_url).into());
+      }
     }
 
     let (tx, rx) = oneshot_channel();
@@ -289,7 +262,7 @@ use std::hash::Hash;
 
 use crate::config::{DAL_OP_MAP, SERVER_CONFIG};
 use crate::util::hash::{calculate_hash, calculate_hash_str};
-use crate::util::signature_v4::PresignedUrl;
+use crate::util::signature_v4::{signed_url, PresignedUrl};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Hash)]
 pub struct ScreenshotRequestQSParams {

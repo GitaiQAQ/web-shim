@@ -34,6 +34,7 @@ tokio = { version = "1", features = [
     "macros",
     "process",
 ] }
+chrono = "0.4.38"
 
 [features]
 default = ["tokio-runtime"]

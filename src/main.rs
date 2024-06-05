@@ -21,6 +21,7 @@ mod worker;
 use config::SERVER_CONFIG;
 use middleware::rate_limiting::{IpRateLimitingMiddleware, NSRateLimitingMiddleware};
 use worker::screenshot::{screenshot, ScreenshotWorker};
+use worker::pdf::{pdf, PDFWorker};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -63,14 +64,19 @@ async fn main() -> Result<(), std::io::Error> {
     tokio::task::spawn(async move {
         let (tx, mut rx) = channel(1);
         for id in 0..SERVER_CONFIG.browser.pool_size.into() {
-            let page = browser.new_page("about:blank").await.unwrap();
-            ScreenshotWorker::new(id, page, tx.clone()).await;
+            ScreenshotWorker::new(id, browser.new_page("about:blank").await.unwrap(), tx.clone()).await;
         }
+
+        PDFWorker::new((SERVER_CONFIG.browser.pool_size + 1).into(), browser.new_page("about:blank").await.unwrap(), tx.clone()).await;
 
         loop {
             let id = rx.next().await.unwrap();
             let page = browser.new_page("about:blank").await.unwrap();
-            ScreenshotWorker::new(id, page, tx.clone()).await;
+            if (id > SERVER_CONFIG.browser.pool_size.into()) {
+                PDFWorker::new(id, page, tx.clone()).await;
+            } else {
+                ScreenshotWorker::new(id, page, tx.clone()).await;
+            }
         }
     });
 
@@ -98,6 +104,11 @@ async fn main() -> Result<(), std::io::Error> {
             app.at(format!("/screenshot/{:#}/", bucket).as_str())
                 .with(rate_limiting)
                 .get(|req| screenshot(req, bucket));
+            
+            let pdf_rate_limiting = NSRateLimitingMiddleware::from(&config.rate_limiting);
+            app.at(format!("/pdf/{:#}/", bucket).as_str())
+                .with(pdf_rate_limiting)
+                .get(|req| pdf(req, bucket));
         }
 
         app.at("/static/")

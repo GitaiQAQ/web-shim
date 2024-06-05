@@ -1,7 +1,10 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{env::current_dir, time::{Duration, SystemTime, UNIX_EPOCH}};
 
+use opendal::raw::{build_abs_path, build_rel_path};
 use serde::{Deserialize, Serialize};
 use tide::Request;
+
+use crate::config::SERVER_CONFIG;
 
 use super::{
     hash::{is_sha256_checksum, sha1_hex},
@@ -173,4 +176,34 @@ impl PresignedUrl {
     pub fn to_url(&self) -> String {
         format!("{:#}?{:#}", self.path, self.to_qs().unwrap())
     }
+}
+
+pub async fn signed_url(op: &opendal::Operator, filename: &String, bucket: &str) -> Result<String, ()> {
+    let signed_url = match op.info().scheme() {
+        opendal::Scheme::Fs => {
+            let file_path = build_rel_path(
+                &current_dir().unwrap().to_string_lossy(),
+                build_abs_path(
+                    format!("{:#}/", op.info().root()).as_str(),
+                    filename,
+                )
+                .as_str()
+            );
+            PresignedUrl::new(
+                &file_path,
+                &SERVER_CONFIG.buckets.get(bucket).unwrap().access_token,
+            )
+            .to_url()
+        
+        },
+        _ => {
+            op
+            .presign_read(filename, Duration::from_secs(3600))
+            .await
+            .unwrap()
+            .uri()
+            .to_string()
+        }
+    };
+    Ok(signed_url)
 }
