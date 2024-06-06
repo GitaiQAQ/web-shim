@@ -4,12 +4,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::emulation::SetDeviceMetricsOverrid
 use futures::lock::Mutex;
 use lazy_static::lazy_static;
 
-use opendal::raw::{build_abs_path, build_rel_path};
-use opendal::Scheme;
 use tide::{Error, Redirect, Request, StatusCode};
-
-use std::env::current_dir;
-use std::time::{Duration, Instant};
 
 use chromiumoxide_cdp::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CaptureScreenshotParams, NavigateParams, Viewport,
@@ -80,7 +75,6 @@ pub async fn worker(
 ) -> Result<String, ()> {
     debug!("worker {:#} recv {:#} {:?}", id, inner.filename, cdp_params);
     let op = DAL_OP_MAP.get(&inner.bucket).unwrap();
-    let fetch_start = inner.req_start.elapsed();
     let filename = format!(
         "{:#}.{:#}",
         inner.filename,
@@ -120,26 +114,17 @@ pub async fn worker(
         .await
         .unwrap();
 
-    let browser_dur = inner.req_start.elapsed();
     let file_size = &img_buf.len();
 
     op.write(&filename, img_buf).await;
 
-    let writer_dur = inner.req_start.elapsed();
-
     
     let signed_url = signed_url(op, &filename, &inner.bucket).await.unwrap();
     
-    let presign_dur = inner.req_start.elapsed();
-
     debug!(
-        "worker {:#} save {:#} {:#} {:#} {:#} {:#} {:#}",
+        "worker {:#} save {:#} {:#}",
         id,
         &filename,
-        fetch_start.as_millis(),
-        browser_dur.as_millis(),
-        writer_dur.as_millis(),
-        presign_dur.as_millis(),
         file_size,
     );
 
@@ -177,7 +162,6 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
 
     let (tx, rx) = oneshot_channel();
 
-    let now = Instant::now();
     let default_screenshot_task_params = &SERVER_CONFIG
         .buckets
         .get(bucket)
@@ -193,7 +177,6 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
             1: ScreenshotTaskInner {
                 full_page,
                 omit_background,
-                req_start: Instant::now(),
                 bucket: bucket.to_owned(),
                 filename,
             },
@@ -232,8 +215,6 @@ pub async fn screenshot(req: Request<()>, bucket: &str) -> tide::Result {
         })
         .unwrap();
 
-    info!("send {:#}", now.elapsed().as_millis());
-
     if let Ok(Some(filename)) = rx.await {
         info!("redirect to {:#}", filename);
         return Ok(Redirect::new(filename).into());
@@ -247,8 +228,6 @@ struct ScreenshotTaskInner {
     filename: String,
     full_page: Option<bool>,
     omit_background: Option<bool>,
-
-    req_start: Instant,
 }
 
 struct ScreenshotTask(
@@ -262,7 +241,7 @@ use std::hash::Hash;
 
 use crate::config::{DAL_OP_MAP, SERVER_CONFIG};
 use crate::util::hash::{calculate_hash, calculate_hash_str};
-use crate::util::signature_v4::{signed_url, PresignedUrl};
+use crate::util::signature_v4::{signed_url};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Hash)]
 pub struct ScreenshotRequestQSParams {

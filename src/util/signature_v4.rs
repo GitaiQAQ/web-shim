@@ -1,4 +1,4 @@
-use std::{env::current_dir, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{env::current_dir, time::{Duration}};
 
 use opendal::raw::{build_abs_path, build_rel_path};
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use tide::Request;
 use crate::config::SERVER_CONFIG;
 
 use super::{
-    hash::{is_sha256_checksum, sha1_hex},
+    hash::{sha1_hex},
     time::now,
 };
 
@@ -107,13 +107,13 @@ impl PresignedUrl {
 
             let ts_now = now();
 
-            if (ts_now < x_amz_date) {
+            if ts_now < x_amz_date {
                 return Err(ParsePresignedUrlError {
                     msg: "WTF".to_owned(),
                 });
             }
 
-            if (x_amz_date + x_amz_expires < ts_now) {
+            if x_amz_date + x_amz_expires < ts_now {
                 return Err(ParsePresignedUrlError {
                     msg: "timeout".to_owned(),
                 });
@@ -157,7 +157,7 @@ impl PresignedUrl {
     pub fn to_qs(&self) -> Result<std::string::String, qs::Error> {
         let x_amz_signature = self.sign();
         let PresignedUrl {
-            path,
+            path: _,
             x_amz_algorithm,
             x_amz_credential,
             x_amz_date,

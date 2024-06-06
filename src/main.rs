@@ -72,7 +72,7 @@ async fn main() -> Result<(), std::io::Error> {
         loop {
             let id = rx.next().await.unwrap();
             let page = browser.new_page("about:blank").await.unwrap();
-            if (id > SERVER_CONFIG.browser.pool_size.into()) {
+            if id > SERVER_CONFIG.browser.pool_size.into() {
                 PDFWorker::new(id, page, tx.clone()).await;
             } else {
                 ScreenshotWorker::new(id, page, tx.clone()).await;
